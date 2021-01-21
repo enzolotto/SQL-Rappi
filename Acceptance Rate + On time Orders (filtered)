@@ -1,0 +1,67 @@
+ACCEPTANCE_RATE_FECHA_INGRESO AS (
+with iterations as (
+    select id.ITERATION_ID                                  as notification_id,
+           id.order_id,
+           id.STOREKEEPER_ID                                as rt_id,
+           id.CREATED_AT::timestamp_ntz                     as calendar_date,
+           case when id.TAKEN is not null then 1 else 0 end as accepted
+    from GLOBAL_SUPPORT_DS.ITERATION_DETAILS id
+    where id.COUNTRY = 'CO'
+
+), acceptance_rate as (
+    select i.rt_id,
+           round((sum(i.accepted) / count(i.notification_id)) , 4) as acceptance_rate
+           , calendar_date::date
+           , l.fecha_ingreso
+    from iterations i
+    join sk_level l on l.storekeeper_id = i.rt_id
+    WHERE  calendar_date = fecha_ingreso
+    group by 1,3,4)
+  
+    select  ar.fecha_ingreso,
+            ar.rt_id AS STOREKEEPER_ID,
+           ar.acceptance_rate
+    from acceptance_rate ar
+ 
+)
+ ONTIME_ORDERS AS (
+  WITH RT_IDS AS (
+SELECT 
+L.STOREKEEPER_ID,
+O.ID AS ORDER_IDS,
+O.CREATED_AT::DATE AS ORDER_DATES,
+FECHA_INGRESO
+FROM  CO_CORE_ORDERS_PUBLIC.ORDERS_VW O 
+JOIN SK_LEVEL L ON COALESCE(O.STOREKEEPER_ID,O.DELIVERYBOY_ID) = L.STOREKEEPER_ID
+WHERE ORDER_DATES>=FECHA_INGRESO)
+
+
+((SELECT
+ 
+   STOREKEEPER_ID
+  , FECHA_INGRESO
+  , count(order_id) AS total_orders
+  , sum(CASE WHEN order_date - first_eta_value > 0 THEN 0 ELSE 1 END) AS eta_0_min
+  , eta_0_min / total_orders AS perc_0_min
+
+FROM algorithms.datamart_etas D
+JOIN RT_IDS SL ON SL.ORDER_IDS = D.ORDER_ID AND D.CREATED_AT::DATE >= FECHA_INGRESO
+WHERE first_eta_value > 0
+AND first_eta_origin = 'eta_estimator'
+AND vertical IN ('Restaurantes', 'RESTAURANTS', 'Restaurants')
+AND COUNTRY_CODE = 'CO'
+GROUP BY 1, 2)
+UNION ALL
+(SELECT
+   STOREKEEPER_ID
+  , FECHA_INGRESO
+  , count(order_id) AS total_orders
+  , sum(CASE WHEN order_date - first_eta_value > 0 THEN 0 ELSE 1 END) AS eta_0_min
+  , eta_0_min / total_orders AS perc_0_min
+
+FROM algorithms.datamart_etas D
+JOIN RT_IDS SL ON SL.ORDER_IDS = D.ORDER_ID AND D.CREATED_AT::DATE >= FECHA_INGRESO
+WHERE first_eta_value > 0
+AND vertical NOT IN ('Restaurantes', 'RESTAURANTS', 'Restaurants')
+ AND COUNTRY_CODE = 'CO'
+GROUP BY 1, 2)))
