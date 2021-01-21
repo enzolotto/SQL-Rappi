@@ -1,0 +1,117 @@
+(With
+    tickets as
+        (select distinct
+            'Live' as ticket_type,
+            upper(country_id) as country,
+            to_char(order_bag_id) as ticket_id,
+            t.order_id,
+            case
+               when OS.was_taken then 'PS'
+               when not OS.was_taken and transport_media_type = 'car' then 'RT car'
+               when not OS.was_taken and transport_media_type != 'car' then 'RT'
+               else 'ERROR' end as PICKER,
+            date_trunc(day,order_bag_created_at) ::date as ticket_date,
+            user_type,
+            level_1 as tipification,
+            level_2 as subtipification, 
+            level_3 as details,
+            os.physical_store_id,
+            ps.name as store_name,
+            vertical_sub_group,
+           first_risk as issue_type
+            from ops_global.live_tickets_details t
+         left join br_core_orders_public.orders_vw o on t.order_id = o.id
+         left join BR_PG_MS_CPGOPS_ORDERS_MS_PUBLIC.ORDER_SUMMARY os on os.order_id = o.id
+         left join br_grability_public.storekeepers_ofuscated so on os.deliveryboy_id = so.id
+         left join BR_PGLR_MS_CPGOPS_STORES_MS_PUBLIC.physical_stores ps on ps.id=os.physical_store_id and ps._fivetran_deleted=false
+            where datediff(week,order_bag_created_at,current_date) <= 10
+             --   and risks != '["PRICE_DIFFERENCE_NEED_APPROVE"]'
+                and level_1 != 'rappi_pay'
+                and country = 'BR'
+                and is_defect = TRUE
+     --           and os.physical_store_id in (50,281, 521,468,286)
+         
+        union all
+         
+        select distinct 
+            'Non Live' as ticket_type,
+            upper(country_id) as country,
+            to_char(kustomer_conversation_id) as ticket_id,
+            t.order_id,
+            case
+               when OS.was_taken then 'PS'
+               when not OS.was_taken and transport_media_type = 'car' then 'RT car'
+               when not OS.was_taken and transport_media_type != 'car' then 'RT'
+               else 'ERROR' end as PICKER,
+            date_trunc(day,kustomer_created_at)::date as ticket_date,
+            user_type,
+            level_1 as tipification,
+            level_2 as subtipification, 
+            level_3 as details,
+            os.physical_store_id,
+            ps.name as store_name,
+            vertical_sub_group,
+          case when replace(replace(replace(replace(replace(replace(upper(description), 'Á', 'A'), 'É', 'E'), 'Í', 'I'), 'Ó', 'O'), 'Ú', 'U'), 'Ã', 'A')                    like  any('%MI%PEDIDO%LLEGO%INCOMPLETO%', '%FALTOU%UM%ITEM%NO%MEU%PEDIDO%', '%MY%ORDER%WAS%INCOMPLETE%','%MEU%PEDIDO%ESTA%INCOMPLETO%')                      then 'Missing item'
+                 when replace(replace(replace(replace(replace(replace(upper(description), 'Á', 'A'), 'É', 'E'), 'Í', 'I'), 'Ó', 'O'), 'Ú', 'U'), 'Ã', 'A')                    like any('%RECEBI%UM%PRODUTO%DIFERENTE%', '%TRAJERON%UN%PRODUCTO%DIFERENTE%', '%MY%ORDER%HAD%A%MISPLACED%PRODUCT%') then 'Wrong item'
+                 when replace(replace(replace(replace(replace(replace(upper(description), 'Á', 'A'), 'É', 'E'), 'Í', 'I'), 'Ó', 'O'), 'Ú', 'U'), 'Ã', 'A')                    like any('%PRODUCTO%LLEGO%EN%MAL%ESTADO%', '%ITEM%EM%MAU%ESTADO%', '%PRODUCT%ARRIVED%IN%POOR%CONDITION%') then 'Poor Condition'
+                 when replace(replace(replace(replace(replace(replace(upper(description), 'Á', 'A'), 'É', 'E'), 'Í', 'I'), 'Ó', 'O'), 'Ú', 'U'), 'Ã', 'A')                    like any('%PEDIDO%NAO%CHEGOU%', '%MI%PEDIDO%NO%FUE%ENTREGADO%') then 'Order didnt arrive'
+                 when replace(replace(replace(replace(replace(replace(upper(description), 'Á', 'A'), 'É', 'E'), 'Í', 'I'), 'Ó', 'O'), 'Ú', 'U'), 'Ã', 'A')                    like any('%DUDAS%CON%EL%COBRO%', '%NAO%RECONHEÇO%UMA%COBRAN_A%', '%ESTE%PEDIDO%GENERO%COBRO%', '%ESTE%PEDIDO%FOI%COBRADO%',                                  '%DUVIDAS%COM%COBRANÇA%', '%DOUBTS%ABOUT%PAYMENTS%','%ME%CANCELARON%MI%PEDIDO%Y%ME%COBRARON%', '%CANCELARAM%MEU%PEDIDO%E%FUI%COBRADO%',                      '%I%GOT%CHARGED%FOR%MY%CANCELED%ORDER%') then 'Was robbed'
+                 else 'Other' end as issue_type
+            from ops_global.non_live_tickets_details t
+            left join br_core_orders_public.orders_vw o on t.order_id = o.id
+            left join BR_PG_MS_CPGOPS_ORDERS_MS_PUBLIC.ORDER_SUMMARY os on os.order_id = o.id
+            left join br_grability_public.storekeepers_ofuscated so on os.deliveryboy_id = so.id            
+            left join BR_PGLR_MS_CPGOPS_STORES_MS_PUBLIC.physical_stores ps on ps.id=os.physical_store_id and ps._fivetran_deleted=false
+            where     datediff(week,kustomer_created_at,current_date)<= 10
+                      and level_1 != 'rappi_pay'
+                      and country = 'BR'
+                      and is_defect = TRUE
+         --             and os.physical_store_id in (50,281, 521,468,286)
+    
+        ),
+ ORDERS AS (
+            SELECT om.country, case
+               when OS.was_taken then 'PS'
+               when not OS.was_taken and transport_media_type = 'car' then 'RT car'
+               when not OS.was_taken and transport_media_type != 'car' then 'RT'
+               else 'ERROR' end as PICKER, 
+               g.vertical_sub_group as vertical, 
+               date_trunc(day,om.created_at)::date as order_date,
+               count(distinct g.order_id) as total_orders
+               FROM co_writable.gortallordersmaster om
+               join br_pg_ms_cpgops_orders_ms_public.order_summary os on os.order_id = om.order_id
+               join global_finances.br_orders g on g.order_id = om.order_id
+               left join br_grability_public.storekeepers_ofuscated sk on COALESCE(om.storekeeper_id,os.deliveryboy_id) = sk.id
+               where g.order_state IN ('finished','pending_review')
+               and datediff(month,om.created_at,current_date) < 3
+               and vertical_sub_group = 'SUPER'
+               and picker = 'RT car'
+               and om.country = 'BR'
+               group by 1,2,3,4
+               order by 3 desc
+ )
+ 
+ 
+
+select
+    t.country as country,
+    t.picker,
+    t.vertical_sub_group as vertical,
+    date_trunc(WEEK,t.ticket_date)::date as ticket_dates,
+     t.ticket_type,
+    t.issue_type,
+    total_orders,
+    count(distinct t.ticket_id) as tickets,
+    (ROUND((TICKETS/TOTAL_ORDERS*100),2)) AS DR_TICKET_TYPE
+   -- ,sum(total_orders) over (partition by t.country, t.picker, t.vertical_sub_group, ticket_dates) as orders_day
+ 
+    from orders o 
+    full join tickets t on t.ticket_date = o.order_date and t.vertical_sub_group = o.vertical and t.picker = o.picker
+    where t.vertical_sub_group in ('SUPER')
+      and t.country IN ('BR')
+      and t.picker = 'RT car'
+  --    and t.issue_type ilike any('%DISPERSION%','%PRICE%','%CARD%','%PAYMENT%')
+
+
+    group by 1,2,3,4,5,6,7
+ order by 4 desc,5 desc
