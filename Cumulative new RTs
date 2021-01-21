@@ -1,0 +1,9 @@
+select sk.created_at::date,count (distinct sk.id) as totalnewcouriers, sum(totalnewcouriers) over ( order by sk.created_at::date asc) as cumulative
+from br_core_orders_public.orders o
+JOIN co_writable.gortallordersmaster os on os.order_id = o.id and datediff(day,o.created_at,current_date) < 28
+join br_grability_public.storekeepers_ofuscated sk on coalesce(o.deliveryboy_id,os.storekeeper_id) = sk.id 
+
+where sk.transport_media_type = 'car'
+and is_active
+group by 1
+order by sk.created_at::date desc
