@@ -1,0 +1,12 @@
+select date_trunc(day,o.created_at)::date as dias, os.store_id, bo.store_name, sk.transport_media_type, count(distinct o.id) as total_orders, count (distinct com.id) as total_iterations
+
+
+from br_core_orders_public.orders o   --where created_at is not null order by created_at  desc limit 10 
+left join informatica.br_pg_ms_dispatch_courier_dispatcher.courier_order_matches com on com.order_id = o.id
+join br_pg_ms_storekeepers_public.storekeepers_ofuscated sk on o.deliveryboy_id = sk.id
+join br_core_orders_public.order_product op on o.id = op.order_id 
+join BR_PG_MS_CPGOPS_ORDERS_MS_PUBLIC.ORDER_SUMMARY os on os.order_id = o.id
+join global_finances.br_orders bo on bo.order_id = o.id  
+where datediff(day, dias, current_date) < 21
+GROUP BY 1,2,3,4
+ORDER BY 1 DESC
