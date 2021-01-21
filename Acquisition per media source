@@ -1,0 +1,12 @@
+(--BR
+select country
+       
+       , city
+       , media_source
+       , transport_media_type
+       , count (distinct rt_id) as totalapproved
+from br_writable.rts_relevant_info
+where date_trunc(week, approved_at) >= dateadd(month, -3, date_trunc(week, current_date))
+and transport_media_type ilike ('car')
+  group by 1,2,3,4
+)
