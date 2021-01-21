@@ -1,0 +1,248 @@
+(WITH STORE_TIME AS (SELECT --GM.ORDER_ID,
+       GM.CITY,
+       GM.SUB_GROUP,
+    --   OS.PHYSICAL_STORE_ID,
+       GM.PICKER_TYPE,
+       SK.TRANSPORT_MEDIA_TYPE,
+       DATE_TRUNC(DAY,OS.CREATED_AT)::DATE AS DAYS,
+       ROUND(AVG(DATEDIFF(minute,GM.BEGIN_ITERATING,GM.RT_ASSIGNED)),0) AS ITERATION_TIME,
+       ROUND(AVG(DATEDIFF(minute,GM.RT_AT_STORE,GM.RT_ON_ROUTE)),0) AS AVG_ON_STORE_TIME,
+       ROUND(LAG(AVG_ON_STORE_TIME,4) OVER (PARTITION BY GM.CITY ORDER BY DAYS),0) AS AVG_ON_STORE_TIME_MINUS_4_DAYS
+FROM co_writable.gortallordersmaster GM
+JOIN BR_PG_MS_CPGOPS_ORDERS_MS_PUBLIC.ORDER_SUMMARY OS ON os.order_id = gm.order_id
+JOIN BR_CORE_ORDERS_PUBLIC.ORDERS O ON O.ID = OS.ORDER_ID 
+LEFT JOIN br_grability_public.storekeepers_ofuscated sk on coalesce(gm.storekeeper_id,os.deliveryboy_id) = sk.id
+WHERE GM.CANCELED_AT IS NULL
+AND GM.order_state IN ('finished', 'pending_review')
+AND GM.rt_assigned IS NOT NULL
+AND GM.payment_method not in ('synthetic')
+AND GM.sub_group IN ('Super')
+AND GM.country = 'BR'
+AND PICKER_TYPE = 'RT'
+AND TRANSPORT_MEDIA_TYPE = 'car'
+AND GM.UNITS_QTY > 20
+AND DATEDIFF(WEEK,DAYS,CURRENT_DATE) <3
+--AND (os.physical_store_id='276')
+--AND TRANSPORT_MEDIA_TYPE = 'car'
+GROUP BY 1,2,3,4,5
+ORDER BY DAYS DESC),
+
+CASHIER_TIME AS (select
+      om.city
+    , om.sub_group
+    , date_trunc('day', order_date)::date as dates
+    , OM.PICKER_TYPE
+    , count(distinct b.order_id) as num_orders
+    , round(avg (time_in_cashier),0) as avg_time_in_cashier
+    , ROUND(LAG(AVG_TIME_IN_CASHIER,4) OVER (PARTITION BY OM.CITY ORDER BY DATEs),0) AS AVG_CASHIER_TIME_MINUS_4_DAYS
+from
+(select os.order_id
+    , os.order_date
+    , os.was_taken
+    , os.products_qty
+    , os.store_type
+    , max(case when e.name in ('product_checked','picking_finished') and e.created_at::date = os.order_date::date then e.created_at else null end) as time_0 
+    , min(case when e.name in ('bill_validated','hand_to_domiciliary', 'order_received_by_sk','bill_reported') and e.created_at::date = os.order_date::date then e.created_at else null end) as time_1
+    , datediff(minute, time_0, time_1) as time_in_cashier
+    from 
+    (select
+      os.order_id
+      , created_at::date as order_date
+      , was_taken
+      , products_qty
+          , store_type
+    from BR_PG_MS_CPGOPS_ORDERS_MS_PUBLIC.ORDER_SUMMARY os
+      where created_at::date >= dateadd(week, -10, current_date)::date
+      and (store_type IN ('market'))
+      and (storekeeper_type in ('rappitendero'))
+      and (state in ('finished','pending_review'))
+   --   and (os.physical_store_id='276')
+    ) as os
+    join BR_pg_ms_cpgops_events_ms_public.order_events as e on os.order_id = e.order_id
+      where e.created_at::date >= dateadd(week, -10, current_date)::date
+      group by 1, 2, 3, 4, 5
+    ) as b
+ join co_writable.gortallordersmaster om on om.order_id = b.order_id and om.country = 'BR' and om.sub_group = 'Super' AND PICKER_TYPE = 'RT' AND OM.UNITS_QTY > 20
+ left join br_grability_public.storekeepers_ofuscated sk on (om.storekeeper_id) = sk.id and transport_media_type = 'car'
+  where 1 = 1
+-- and type not in ('SHOPPER')
+  group by 1, 2, 3, 4
+  having avg_time_in_cashier > 0
+  order by dates desc)
+  
+  
+  SELECT ST.CITY,ST.SUB_GROUP,ST.DAYS,CT.NUM_ORDERS,ST.AVG_ON_STORE_TIME,ST.AVG_ON_STORE_TIME_MINUS_4_DAYS,CT.AVG_TIME_IN_CASHIER,CT.AVG_CASHIER_TIME_MINUS_4_DAYS
+  FROM STORE_TIME ST
+  JOIN CASHIER_TIME CT ON ST.CITY = CT.CITY AND CT.DATES = ST.DAYS
+  WHERE AVG_ON_STORE_TIME_MINUS_4_DAYS IS NOT NULL
+  AND AVG_CASHIER_TIME_MINUS_4_DAYS IS NOT NULL
+  ORDER BY DAYS DESC
+  )
+  UNION ALL
+  (WITH STORE_TIME AS (SELECT --GM.ORDER_ID,
+       GM.CITY,
+       GM.SUB_GROUP,
+    --   OS.PHYSICAL_STORE_ID,
+       GM.PICKER_TYPE,
+       SK.TRANSPORT_MEDIA_TYPE,
+       DATE_TRUNC(DAY,OS.CREATED_AT)::DATE AS DAYS,
+       ROUND(AVG(DATEDIFF(minute,GM.BEGIN_ITERATING,GM.RT_ASSIGNED)),0) AS ITERATION_TIME,
+       ROUND(AVG(DATEDIFF(minute,GM.RT_AT_STORE,GM.RT_ON_ROUTE)),0) AS AVG_ON_STORE_TIME,
+       ROUND(LAG(AVG_ON_STORE_TIME,4) OVER (PARTITION BY GM.CITY ORDER BY DAYS),0) AS AVG_ON_STORE_TIME_MINUS_4_DAYS
+FROM co_writable.gortallordersmaster GM
+JOIN CO_PG_MS_CPGOPS_ORDERS_MS_PUBLIC.ORDER_SUMMARY OS ON os.order_id = gm.order_id
+JOIN CO_CORE_ORDERS_PUBLIC.ORDERS_VW O ON O.ID = OS.ORDER_ID 
+LEFT JOIN CO_grability_public.storekeepers_ofuscated sk on coalesce(gm.storekeeper_id,os.deliveryboy_id) = sk.id
+WHERE GM.CANCELED_AT IS NULL
+AND GM.order_state IN ('finished', 'pending_review')
+AND GM.rt_assigned IS NOT NULL
+AND GM.payment_method not in ('synthetic')
+AND GM.sub_group IN ('Super')
+AND GM.country = 'CO'
+AND PICKER_TYPE = 'RT'
+AND TRANSPORT_MEDIA_TYPE = 'car'
+--AND GM.UNITS_QTY > 20
+AND DATEDIFF(WEEK,DAYS,CURRENT_DATE) <3
+--AND (os.physical_store_id='276')
+--AND TRANSPORT_MEDIA_TYPE = 'car'
+GROUP BY 1,2,3,4,5
+ORDER BY DAYS DESC),
+
+CASHIER_TIME AS (select
+      om.city
+    , om.sub_group
+    , date_trunc('day', order_date)::date as dates
+    , OM.PICKER_TYPE
+    , count(distinct b.order_id) as num_orders
+    , round(avg (time_in_cashier),0) as avg_time_in_cashier
+    , ROUND(LAG(AVG_TIME_IN_CASHIER,4) OVER (PARTITION BY OM.CITY ORDER BY DATEs),0) AS AVG_CASHIER_TIME_MINUS_4_DAYS
+from
+(select os.order_id
+    , os.order_date
+    , os.was_taken
+    , os.products_qty
+    , os.store_type
+    , max(case when e.name in ('product_checked','picking_finished') and e.created_at::date = os.order_date::date then e.created_at else null end) as time_0 
+    , min(case when e.name in ('bill_validated','hand_to_domiciliary', 'order_received_by_sk','bill_reported') and e.created_at::date = os.order_date::date then e.created_at else null end) as time_1
+    , datediff(minute, time_0, time_1) as time_in_cashier
+    from 
+    (select
+      os.order_id
+      , created_at::date as order_date
+      , was_taken
+      , products_qty
+          , store_type
+    from CO_PG_MS_CPGOPS_ORDERS_MS_PUBLIC.ORDER_SUMMARY os
+      where created_at::date >= dateadd(week, -10, current_date)::date
+    --  and (store_type IN ('market'))
+      and (storekeeper_type in ('rappitendero'))
+      and (state in ('finished','pending_review'))
+   --   and (os.physical_store_id='276')
+    ) as os
+    join CO_pg_ms_cpgops_events_ms_public.order_events as e on os.order_id = e.order_id
+      where e.created_at::date >= dateadd(week, -10, current_date)::date
+      group by 1, 2, 3, 4, 5
+    ) as b
+ join co_writable.gortallordersmaster om on om.order_id = b.order_id and om.country = 'CO' and om.sub_group = 'Super' AND PICKER_TYPE = 'RT' --AND OM.UNITS_QTY > 20
+ left join CO_grability_public.storekeepers_ofuscated sk on (om.storekeeper_id) = sk.id and transport_media_type = 'car'
+  where 1 = 1
+-- and type not in ('SHOPPER')
+  group by 1, 2, 3, 4
+  having avg_time_in_cashier > 0
+  order by dates desc)
+  
+  
+  SELECT ST.CITY,ST.SUB_GROUP,ST.DAYS,CT.NUM_ORDERS,ST.AVG_ON_STORE_TIME,ST.AVG_ON_STORE_TIME_MINUS_4_DAYS,CT.AVG_TIME_IN_CASHIER,CT.AVG_CASHIER_TIME_MINUS_4_DAYS
+  FROM STORE_TIME ST
+  JOIN CASHIER_TIME CT ON ST.CITY = CT.CITY AND CT.DATES = ST.DAYS
+  WHERE AVG_ON_STORE_TIME_MINUS_4_DAYS IS NOT NULL
+  AND AVG_CASHIER_TIME_MINUS_4_DAYS IS NOT NULL
+  ORDER BY DAYS DESC
+  
+  
+)
+
+UNION ALL
+
+(WITH STORE_TIME AS (SELECT --GM.ORDER_ID,
+       GM.CITY,
+       GM.SUB_GROUP,
+    --   OS.PHYSICAL_STORE_ID,
+       GM.PICKER_TYPE,
+       SK.TRANSPORT_MEDIA_TYPE,
+       DATE_TRUNC(DAY,OS.CREATED_AT)::DATE AS DAYS,
+       ROUND(AVG(DATEDIFF(minute,GM.BEGIN_ITERATING,GM.RT_ASSIGNED)),0) AS ITERATION_TIME,
+       ROUND(AVG(DATEDIFF(minute,GM.RT_AT_STORE,GM.RT_ON_ROUTE)),0) AS AVG_ON_STORE_TIME,
+       ROUND(LAG(AVG_ON_STORE_TIME,4) OVER (PARTITION BY GM.CITY ORDER BY DAYS),0) AS AVG_ON_STORE_TIME_MINUS_4_DAYS
+FROM co_writable.gortallordersmaster GM
+JOIN MX_PG_MS_CPGOPS_ORDERS_MS_PUBLIC.ORDER_SUMMARY OS ON os.order_id = gm.order_id
+JOIN MX_CORE_ORDERS_PUBLIC.ORDERS O ON O.ID = OS.ORDER_ID 
+LEFT JOIN MX_grability_public.storekeepers_ofuscated sk on coalesce(gm.storekeeper_id,os.deliveryboy_id) = sk.id
+WHERE GM.CANCELED_AT IS NULL
+AND GM.order_state IN ('finished', 'pending_review')
+AND GM.rt_assigned IS NOT NULL
+AND GM.payment_method not in ('synthetic')
+AND GM.sub_group IN ('Super')
+AND GM.country = 'MX'
+AND PICKER_TYPE = 'RT'
+AND TRANSPORT_MEDIA_TYPE = 'car'
+AND GM.UNITS_QTY > 20
+AND DATEDIFF(WEEK,DAYS,CURRENT_DATE) <2
+--AND (os.physical_store_id='276')
+--AND TRANSPORT_MEDIA_TYPE = 'car'
+GROUP BY 1,2,3,4,5
+ORDER BY DAYS DESC),
+
+CASHIER_TIME AS (select
+      om.city
+    , om.sub_group
+    , date_trunc('day', order_date)::date as dates
+    , OM.PICKER_TYPE
+    , count(distinct b.order_id) as num_orders
+    , round(avg (time_in_cashier),0) as avg_time_in_cashier
+    , ROUND(LAG(AVG_TIME_IN_CASHIER,4) OVER (PARTITION BY OM.CITY ORDER BY DATEs),0) AS AVG_CASHIER_TIME_MINUS_4_DAYS
+from
+(select os.order_id
+    , os.order_date
+    , os.was_taken
+    , os.products_qty
+    , os.store_type
+    , max(case when e.name in ('product_checked','picking_finished') and e.created_at::date = os.order_date::date then e.created_at else null end) as time_0 
+    , min(case when e.name in ('bill_validated','hand_to_domiciliary', 'order_received_by_sk','bill_reported') and e.created_at::date = os.order_date::date then e.created_at else null end) as time_1
+    , datediff(minute, time_0, time_1) as time_in_cashier
+    from 
+    (select
+      os.order_id
+      , created_at::date as order_date
+      , was_taken
+      , products_qty
+          , store_type
+    from MX_PG_MS_CPGOPS_ORDERS_MS_PUBLIC.ORDER_SUMMARY os
+      where created_at::date >= dateadd(week, -10, current_date)::date
+      and (store_type IN ('market'))
+      and (storekeeper_type in ('rappitendero'))
+      and (state in ('finished','pending_review'))
+   --   and (os.physical_store_id='276')
+    ) as os
+    join MX_pg_ms_cpgops_events_ms_public.order_events as e on os.order_id = e.order_id
+      where e.created_at::date >= dateadd(week, -10, current_date)::date
+      group by 1, 2, 3, 4, 5
+    ) as b
+ join co_writable.gortallordersmaster om on om.order_id = b.order_id and om.country = 'MX' and om.sub_group = 'Super' AND PICKER_TYPE = 'RT' AND OM.UNITS_QTY > 20
+ left join MX_grability_public.storekeepers_ofuscated sk on (om.storekeeper_id) = sk.id and transport_media_type = 'car'
+  where 1 = 1
+-- and type not in ('SHOPPER')
+  group by 1, 2, 3, 4
+  having avg_time_in_cashier > 0
+  order by dates desc)
+  
+  
+  SELECT ST.CITY,ST.SUB_GROUP,ST.DAYS,CT.NUM_ORDERS,ST.AVG_ON_STORE_TIME,ST.AVG_ON_STORE_TIME_MINUS_4_DAYS,CT.AVG_TIME_IN_CASHIER,CT.AVG_CASHIER_TIME_MINUS_4_DAYS
+  FROM STORE_TIME ST
+  JOIN CASHIER_TIME CT ON ST.CITY = CT.CITY AND CT.DATES = ST.DAYS
+  WHERE AVG_ON_STORE_TIME_MINUS_4_DAYS IS NOT NULL
+  AND AVG_CASHIER_TIME_MINUS_4_DAYS IS NOT NULL
+  ORDER BY DAYS DESC  
+  
+)
+  
