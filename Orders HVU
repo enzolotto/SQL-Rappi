@@ -1,0 +1,22 @@
+SELECT 
+  value_bucket,
+  DATE_TRUNC(WEEK,m.CREATED_AT)::DATE AS ORDER_WEEK,
+  COUNT (DISTINCT M.ORDER_ID) AS HVU_ORDERS
+  FROM co_writable.gortallordersmaster m 
+  join br_PG_MS_STOREKEEPERS_PUBLIC.storekeepers_ofuscated SK ON SK.ID = M.STOREKEEPER_ID
+  JOIN BR_PG_MS_SK_SCORE_HISTORY_PUBLIC.SK_LEVEL S ON S.STOREKEEPER_ID = SK.ID
+  JOIN BR_PG_MS_SK_SCORE_HISTORY_PUBLIC.LEVEL L ON S.LEVEL_ID = L.ID
+  JOIN (select distinct
+	  			country,
+	  			application_user_id,
+	  			case
+	  				when type_user like '%HQ%' then 'High'
+	  				else 'Low' end
+	  	        as value_bucket
+	  		from global_finances.tbl_test_hv_users) HVU ON HVU.APPLICATION_USER_ID = M.APPLICATION_USER_ID AND HVU.COUNTRY = M.COUNTRY
+  WHERE DATEDIFF(WEEK,ORDER_WEEK,DATE_TRUNC(WEEK,CURRENT_TIMESTAMP))< 6
+  AND M.ORDER_STATE IN ('finished','pending_review')
+  AND m.SUB_GROUP = 'Super'
+  GROUP BY 1,2
+  order by order_week desc
+  
