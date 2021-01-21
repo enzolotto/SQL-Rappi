@@ -1,0 +1,30 @@
+WITH STREAK AS (with base as (
+  select CI.created_at as fecha,
+  CI.courier_id,
+  OI.ORDER_ID,
+  sum(case when CI.payload:auto_accept_boost = 'true' then 1 else 0 end) as streak
+  from informatica.CO_pg_ms_dispatch_courier_dispatcher.courier_iterations CI
+  JOIN informatica.CO_pg_ms_dispatch_courier_dispatcher.order_iterations OI ON OI.ITERATION_ID = CI.ITERATION_ID
+  where CI.created_at >= dateadd('days',-7,current_date)
+  group by 1,2,3
+)
+select fecha::date as datas,
+courier_id,
+ORDER_ID,
+sum(case when streak = 0 then 1 else 0 end) as no_streak,
+sum(case when streak != 0 then 1 else 0 end) as streak
+from base 
+where streak = 1 
+group by 1,2,3
+order by 1 desc)
+
+
+SELECT
+G.COUNTRY, 
+S.COURIER_ID, 
+CONCAT(SK.FIRST_NAME,' ',SK.LAST_NAME) AS NAME, 
+SK.TRANSPORT_MEDIA_TYPE AS VEHICLE, sk.type, 
+S.NO_STREAK, 
+S.STREAK, 
+G.CREATED_AT::DATE AS DIA, 
+COUNT (DISTINCT G.ORDER_ID) AS TOTAL_ORDERS
