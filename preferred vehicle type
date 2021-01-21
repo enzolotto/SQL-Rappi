@@ -1,0 +1,93 @@
+with ops as 
+( 
+ select 
+  store_id, 
+  name,
+  
+  v.sub_group as vertical 
+  from  br_grability_public.stores s 
+left join br_grability_public.verticals v on s.type = v.store_type 
+  where not s._fivetran_deleted
+  and not v._fivetran_deleted
+  and v.sub_group in ( 'Super', 'Hiper', 'Licores', 'Express', 'Farmacia') 
+  )
+
+, gmv as 
+(
+
+select  o.id, 
+coalesce(sum(total_value),0)
++coalesce(sum(tip),0)
++coalesce(sum(total_order_discount),0)
++coalesce(sum(total_charge_discount),0)
++COALESCE(sum(rappi_pay),0) as GMV
+--   , PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY gmv) as top25
+from br_core_orders_public.orders as o
+left join (select distinct order_id,
+           total_order_discount, 
+           total_charge_discount,
+           rank() over(partition by order_id order by max(id) desc) rank
+           from br_core_orders_public.order_discounts
+           group by 1,2,3) od ON o.id =  od.order_id and rank = 1
+
+
+left join (select order_id, 
+           sum(coalesce(amount,0)) as rappi_pay
+           from br_core_orders_public.rappi_pay_debits
+           where use_credit = true
+           group by 1) rp on rp.order_id = o.id
+group by 1 
+
+  
+  )
+, BASE AS 
+(
+select
+O.ID,
+o.created_at::date as dia, 
+  ops.name,
+ops.vertical, 
+  sk.transport_media_type,
+case 
+when os.was_taken = 'false' then 0
+when os.was_taken = 'true'  then 1 
+
+end as sk_type, 
+gmv.gmv,  
+sum(op.total_price) as order_value, 
+sum(op.units) as items 
+from br_core_orders_public.orders o 
+join gmv on gmv.id = o.id 
+join BR_PG_MS_CPGOPS_ORDERS_MS_PUBLIC.order_summary os on o.id = os.order_id 
+join ops on ops.store_id = os.store_id 
+join br_grability_public.storekeepers_ofuscated sk on o.deliveryboy_id = sk.id
+join br_core_orders_public.order_product op on o.id = op.order_id 
+where not op._fivetran_deleted 
+AND DIA >= current_date - interval '31 days'
+and o.state in ('finished','pending_review')
+group by 1,2,3,4 ,5,6,7
+  )
+
+
+SELECT 
+name as store_name,
+vertical,
+sk_type,
+params:preferred_transport preferred_transport,
+  case
+    when items <= 5 then '5'
+    when items > 5 and items <= 10 then '5 - 10'
+    when items > 10 and items <= 15 then '10 - 15'
+    when items > 15  and items <= 20 then '15 - 20'
+  when items > 20 and items <= 30 then '20 - 30'
+  when items > 30 then '30'
+    end as num_items
+,sum(gmv) as _gmv_,  
+sum(order_value) as order_value_, 
+count(distinct b.id) as tot_orders,
+transport_media_type
+from base b
+join br_core_orders_public.order_modifications om on b.id = om.order_id
+where sk_type = 1
+and om.type = 'shopper_request_rt'
+group by 1,2,3,4,5,9
