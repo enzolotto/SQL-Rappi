@@ -1,0 +1,17 @@
+Select 'Referred' as type,
+          SK_ID_REFERRED as SKIDs,
+          transport_media_type as vehicle_type,
+          so.city,
+          
+          max (o.created_at)::date AS last_order
+        
+from br_pg_ms_sk_referral_public.campaign_registry cr
+join br_grability_public.storekeepers_ofuscated so on cr.SK_ID_REFERRED = so.id and transport_media_type = 'car'
+ join br_core_orders_public.orders o on coalesce(o.deliveryboy_id,o.storekeeper_id) = cr.sk_id_referred
+ where cr.state not ilike 'uncompleted'
+group by 1,2,3,4
+  
+ having datediff(month,last_order,current_timestamp) < 4
+ and datediff(day,last_order,current_timestamp) > 27
+
+order by last_order desc
