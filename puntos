@@ -1,0 +1,37 @@
+with base as (
+select sr.storekeeper_id, 
+       sk.city,
+       v.sub_group as vertical, 
+       sr.multiplier, 
+       date_trunc(month,sr.created_at::date) as mes,
+       sum ((sr.multiplier*sr.reward_value)) as total_reward,
+       count (distinct sr.entity_id ) as num_orders 
+       
+
+from br_pg_ms_rt_rewards_public.storekeeper_rewards sr
+join br_grability_public.storekeepers_ofuscated sk on sk.id = sr.storekeeper_id
+left join br_core_orders_public.orders o on o.id = sr.entity_id
+left join br_core_orders_calculated_information.orders cio on cio.order_id = sr.entity_id 
+left join br_grability_public.stores s on cio.store_id = s.store_id and s._fivetran_deleted = false 
+left join br_grability_public.verticals v on s.type = v.store_type and v._fivetran_deleted = false
+
+where status = 'won'
+and sk.transport_media_type = 'motorbike'
+and sk.type ilike '%tendero%'
+and sr.created_at::date >= dateadd('month',-3,date_trunc('month',current_date))
+
+group by 1,2,3,4,5
+  )
+  
+  select distinct storekeeper_id, 
+                  max (multiplier) as categoria, 
+                  sum  (total_reward) as total_reward, 
+                  sum  (num_orders) as total_numorders, 
+                  city
+  from base 
+  where mes = '2020-11-01'
+  group by 1,5
+  order by 2 desc, 3 desc
+  
+  
+  limit 500+
