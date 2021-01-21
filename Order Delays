@@ -1,0 +1,15 @@
+select 
+ delay_reason
+, date_trunc(day, od.created_at)::DATE dias
+, od.store_id
+, bo.store_name
+, count(distinct (case when delayed_order = 'TRUE' then od.order_id end)) delayed
+from ops_global.order_delays od
+LEFT JOIN global_finances.br_orders bo on bo.order_id = od.order_id
+
+where country = 'BR'
+and od.order_state in ('finished','pending_review')
+ 
+and date_trunc('week', od.created_at)::date >= date_trunc('week', current_date - interval '4 week')::date
+group by 1,2,3,4
+order by dias desc, delayed desc
