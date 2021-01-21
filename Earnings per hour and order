@@ -1,0 +1,22 @@
+EARNINGS_ORDER_FECHA AS (select sl.storekeeper_id, sl.fecha_ingreso, avg(courier_earnings) courier_earnings, avg(ue.tip) tip, avg(ue.courier_earnings + ue.tip + ue.incentives + ue.manual_subsidies + ue.guarantees) total_earning
+from global_finances.tbl_ue_ops ue
+left join co_writable.gortallordersmaster g on ue.order_id = g.order_id
+left join co_PG_MS_STOREKEEPERS_PUBLIC.storekeepers_ofuscated so on g.storekeeper_id = so.id
+join sk_level sl on sl.storekeeper_id = so.id and g.created_at::date = sl.fecha_ingreso
+where date >= dateadd(week, - 10, current_date)::date  and g.order_state in ('finished', 'pending_review') and so.type = 'rappitendero'
+and country_index in ('CO')
+group by 1, 2)
+EARNINGS_HOUR_DAY AS (WITH EARNINGS_ORDER_AFTER AS (
+select sl.storekeeper_id,
+ sl.fecha_ingreso,
+ date_trunc(day,g.created_at)::date as dias,
+ SUM(courier_earnings) courier_earnings,
+ SUM(ue.tip) tip,
+ SUM(ue.courier_earnings + ue.tip + ue.incentives + ue.manual_subsidies + ue.guarantees) total_earning
+from global_finances.tbl_ue_ops ue
+left join co_writable.gortallordersmaster g on ue.order_id = g.order_id
+left join co_PG_MS_STOREKEEPERS_PUBLIC.storekeepers_ofuscated so on g.storekeeper_id = so.id
+join sk_level sl on sl.storekeeper_id = so.id and g.created_at::date = sl.fecha_ingreso
+where  g.order_state in ('finished', 'pending_review') and so.type = 'rappitendero'
+and country_index in ('CO')
+group by 1, 2, 3)
