@@ -1,0 +1,8 @@
+(select distinct
+	  			country,
+	  			application_user_id,
+	  			case
+	  				when type_user like '%HQ%' then 'High'
+	  				else 'Low' end
+	  	        as value_bucket
+	  		from global_finances.tbl_test_hv_users where value_bucket = 'High')
