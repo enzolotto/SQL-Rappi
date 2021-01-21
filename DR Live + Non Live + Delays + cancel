@@ -1,0 +1,113 @@
+with 
+orders as 
+(
+	select b.order_id, coalesce(b.closed_at,b.place_at,b.updated_at)::date as day, b.order_state, os.physical_store_id, b.store_name
+	from global_finances.br_orders b
+    join BR_PG_MS_CPGOPS_ORDERS_MS_PUBLIC.ORDER_SUMMARY os on os.order_id = b.order_id
+	where os.physical_store_id = 508
+	and coalesce(
+      b.closed_at,b.place_at,b.updated_at)::date between (date_trunc(day,current_date) - interval '4 week')::date and (date_trunc(day,current_date) - interval '1 day')::date  
+	and b.order_state not ilike '%split%'
+	and b.order_state not ilike '%payment%'
+	and b.order_state not ilike '%fraud%'
+),
+rt_picked as 
+(
+	SELECT 
+	order_id,
+	CASE WHEN STOREKEEPER_TYPE IN ('rappitendero') and vehicle ='car' THEN 'rt car'
+    WHEN STOREKEEPER_TYPE IN ('rappitendero') and vehicle = 'car' THEN 'rt'
+	WHEN STOREKEEPER_TYPE IN ('picker') THEN 'picker'
+	WHEN STOREKEEPER_TYPE IN ('personalshopper')  then 'shopper'
+	END AS STOREKEEPER_TYPE 
+	from
+	(
+		select
+	  	order_id, 
+	--  storekeeper_id, 
+		coalesce(sh.type,so.TYPE) as storekeeper_type,
+        so.transport_media_type as vehicle
+		from GLOBAL_FINANCES.br_order_details od
+		left join br_grability_public.storekeepers_ofuscated so on so.id=od.storekeeper_id and so.type not in ('fake')
+		left join 
+		(
+			select distinct
+			s.id,
+			coalesce(shif.TYPE,s.TYPE,'picker') AS type
+			from br_pg_ms_shoppers_ms_public.shoppers s 
+			LEFT join
+			(  
+				select distinct
+				shi.shopper_id as id,
+				si.type as type
+				from br_pglr_ms_cpgops_stores_ms_public.shifts shi
+				left join br_pg_ms_shoppers_ms_public.shoppers si on si.id=shi.shopper_id ) shif on s.id=shif.id
+		)
+		sh on sh.id = so.id
+		where od.vertical in ('CPGs','Otros')  
+	)
+	--where storekeeper_type in ('rt','rappitendero')
+),
+ops_cancels as
+(
+	SELECT order_id, level_1--, level_2, COUNT(*) AS cancelled 
+  FROM ops_global.cancellation_reasons  WHERE level_1 = 'ops_rt' and country = 'BR' GROUP BY 1,2
+),
+partner_cancel as
+(
+	SELECT order_id, level_1--, level_2, COUNT(*) AS cancelled 
+	FROM ops_global.cancellation_reasons  WHERE level_1 = 'partner_related_errors' and country = 'BR' GROUP BY 1,2
+),
+defect_non_live as 
+(
+	SELECT
+	              order_id,
+	              COUNT (DISTINCT (CASE WHEN user_type='customer' AND is_defect='TRUE' THEN 1 ELSE NULL END)) AS tickets_user_non_live,
+	              COUNT (DISTINCT (CASE WHEN user_type='rt' AND is_defect='TRUE' THEN 1 ELSE NULL END)) AS tickets_rt_non_live
+	              FROM ops_global.non_live_tickets_details
+	              WHERE country_id = 'br'
+	              GROUP BY 1
+),
+defect_live as 
+(
+		SELECT
+	              order_id,
+	              COUNT (DISTINCT (CASE WHEN user_type='customer' AND is_defect='TRUE' THEN 1 ELSE NULL END)) AS tickets_user_live,
+	              COUNT (DISTINCT (CASE WHEN user_type='rt' AND is_defect='TRUE' THEN 1 ELSE NULL END)) AS tickets_rt_live
+	              FROM ops_global.live_tickets_details
+	              WHERE country_id = 'br'
+	              GROUP BY 1
+),
+delays as 
+(
+	SELECT order_id,
+              COUNT(DISTINCT CASE WHEN delayed_order THEN order_id END) AS is_delay
+              FROM ops_global.order_delays
+              WHERE country = 'BR'
+              GROUP BY 1
+)
+select 
+    o.store_name,
+    o.physical_store_id,
+	day,
+	rp.storekeeper_type,
+	count(distinct o.order_id) as placed_orders,
+	count(distinct case when o.order_state in ('finished','pending_review') then o.order_id end ) as finished_orders,
+	count(distinct case when (dl.order_id is not null and dl.tickets_user_live >= 1) or (dnl.order_id is not null and dnl.tickets_user_non_live >= 1) then o.order_id end) as defect_orders,
+	count(distinct case when del.order_id is not null and del.is_delay >=1 then o.order_id end) as delay_orders,
+	count(distinct case when pc.order_id is not null  then o.order_id end) as partner_cancel_orders,
+	count(distinct case when oc.order_id is not null  then o.order_id end) as ops_cancel_orders,
+	defect_orders/greatest(finished_orders,1) as defect_rate,
+	delay_orders/greatest(finished_orders,1) as delay_rate,
+	partner_cancel_orders/greatest(placed_orders,1) as partner_cancel_rate,
+	ops_cancel_orders/greatest(placed_orders,1) as ops_cancel_rate
+from 
+orders o
+left join rt_picked rp on o.order_id = rp.order_id
+left join ops_cancels oc on o.order_id = oc.order_id
+left join partner_cancel pc on o.order_id = pc.order_id
+left join defect_live dl on o.order_id = dl.order_id
+left join  defect_non_live dnl on o.order_id = dnl.order_id 
+left join delays del on o.order_id = del.order_id
+where storekeeper_type is not null
+group by 1,2,3,4
