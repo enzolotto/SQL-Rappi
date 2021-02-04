@@ -1,0 +1,6 @@
+As tabelas dos dados de que eu uso são essas:
+cancel rate --- ops_global.power_bi_cancel_global
+defect rate --- ops_global.power_bi_defect_global
+flawless orders --- ops_global.bbe_bux_features
+order delay --- ops_global.power_bi_order_delay
+contribution margin --- GLOBAL_FINANCES.TBL_UE_CONTRIBUTION_MARGIN
