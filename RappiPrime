@@ -1,0 +1,3 @@
+select distinct application_user_id
+  from br_pg_ms_rappi_prime_prime.prime_details
+  where ends_at::date >= current_date
