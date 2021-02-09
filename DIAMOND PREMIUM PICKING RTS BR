@@ -1,0 +1,56 @@
+select date_trunc(week,om.created_at)::DATE AS WEEK, PICKER_TYPE, om.city, COUNT(DISTINCT OM.ORDER_ID) 
+from co_writable.gortallordersmaster om
+join  BR_PG_MS_CPGOPS_ORDERS_MS_PUBLIC.ORDER_SUMMARY os on os.order_id = om.order_id and om.country = 'BR' and os.physical_store_id IN (673,7602,7612,7945,9147,9165,9181,9417,9420,9649,11260,11378,9160,
+8730,15243,392,407,508,9300,11277,276,9741,7593,642,503,14224,9301,14395,11889,384,14768,311,313,310,14260,19,467,9215,14770,520,726
+)
+join (SELECT distinct
+       week,
+       LEVEL,
+       transport_media_type,
+       city,
+       storekeeper_id
+FROM (SELECT
+	DATE_TRUNC('week', o.created_at::DATE) AS week,
+	o.order_id,
+	o.country,
+	d.storekeeper_id,
+	IFNULL(s.level_name, 'rookie') AS level,
+    s.transport_media_type,
+    s.city
+FROM
+	global_finances.global_orders o
+	JOIN global_finances.global_order_details d
+	ON o.order_id = d.order_id AND o.country = d.country
+	LEFT JOIN (
+SELECT
+			'BR' AS country,
+			s.storekeeper_id,
+			s.created_at::TIMESTAMP_NTZ AS starts_at,
+			LEAD(starts_at, 1, CURRENT_TIMESTAMP::TIMESTAMP_NTZ) OVER (PARTITION BY s.storekeeper_id ORDER BY s.created_at) AS ends_at,
+			l.level_name,
+            sk.transport_media_type,
+            sk.city
+		FROM br_pg_ms_sk_score_history_public.sk_level s
+        LEFT JOIN br_pg_ms_sk_score_history_public.level l
+        ON s.level_id = l.id
+        LEFT JOIN BR_PG_MS_STOREKEEPERS_PUBLIC.storekeepers_ofuscated SK
+        ON sk.id = s.storekeeper_id
+		QUALIFY
+			ends_at::DATE >= '2020-12-28') s ON o.country = s.country AND d.storekeeper_id = s.storekeeper_id AND o.created_at::TIMESTAMP_NTZ BETWEEN s.starts_at AND s.ends_at
+WHERE
+	o.created_at::DATE >= '2020-12-28'
+	AND o.order_state IN ('finished', 'pending_review')
+    AND O.COUNTRY = 'BR'
+ ) 
+ WHERE transport_media_type IN ('car')
+ AND LEVEL = 'diamond'
+ AND CITY IN ('Belo Horizonte','Sao Paulo','Rio de Janeiro')
+-- GROUP BY 1,2,3
+   
+) d on d.storekeeper_id = coalesce(om.storekeeper_id, om.shopper_id)
+WHERE OM.CITY IS NOT NULL AND PICKER_TYPE = 'RT'
+GROUP BY 1,2,3
+order by week desc
+
+                                   
+                                
