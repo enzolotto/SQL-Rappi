@@ -1,0 +1,47 @@
+(SELECT 'mx' as country,
+    d.level_date,
+    s.state,
+    COUNT(DISTINCT s.storekeeper_id) AS amount,
+    SUM(amount) OVER (PARTITION BY d.level_date) AS total_storekeepers,
+    amount / total_storekeepers AS percentage
+FROM
+    (
+        SELECT DISTINCT
+            date_trunc(week,created_at)::DATE AS level_date,
+            MIN(created_at) AS timest
+        FROM
+            mx_core_orders_public.order_modifications
+        WHERE
+            level_date > DATEADD(week, -12, CURRENT_DATE)
+            AND level_date < CURRENT_DATE
+        GROUP BY
+            1
+    ) d
+    JOIN (
+        SELECT
+            l.level_name AS state,
+            s.storekeeper_id,
+            s.created_at,
+            IFNULL(s.end_level_at, CURRENT_TIMESTAMP) AS window
+        FROM
+            mx_pg_ms_sk_score_history_public.sk_level s
+            JOIN mx_pg_ms_sk_score_history_public.level l
+            ON s.level_id = l.id
+            join MX_PG_MS_STOREKEEPERS_PUBLIC.storekeepers_ofuscated SK
+        ON sk.id = s.storekeeper_id --and city = 'Ciudad de México'
+        WHERE
+            s.created_at >= DATEADD(week, -12, CURRENT_DATE)
+      AND l.level_name != 'rookie'
+    ) s
+    ON d.timest BETWEEN s.created_at AND s.window
+GROUP BY
+    1, 2,3
+ORDER BY
+    CASE
+        WHEN s.state = 'danger' THEN 5
+        WHEN s.state = 'rookie' THEN 4
+        WHEN s.state = 'bronze' THEN 3
+        WHEN s.state = 'silver' THEN 2
+        WHEN s.state = 'diamond' THEN 1
+     end
+    )
